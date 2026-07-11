@@ -1,9 +1,8 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
-import { LoginDialog } from "./login-dialog";
 
 export interface Profile {
   id: string;
@@ -17,9 +16,11 @@ interface UserContextValue {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  signingIn: boolean;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
-  promptLogin: () => void;
+  /** Signs the visitor in as an anonymous guest (no email required). */
+  signInAsGuest: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
@@ -28,7 +29,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loginOpen, setLoginOpen] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
+  const signingInRef = useRef(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -89,14 +91,34 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   };
 
-  const promptLogin = () => setLoginOpen(true);
+  const signInAsGuest = async () => {
+    if (signingInRef.current || user) return;
+    const supabase = createClient();
+    if (!supabase) return;
+    signingInRef.current = true;
+    setSigningIn(true);
+    try {
+      await supabase.auth.signInAnonymously();
+      // onAuthStateChange picks up the new session and loads the profile.
+    } finally {
+      signingInRef.current = false;
+      setSigningIn(false);
+    }
+  };
 
   return (
     <UserContext.Provider
-      value={{ user, profile, loading, refreshProfile, signOut, promptLogin }}
+      value={{
+        user,
+        profile,
+        loading,
+        signingIn,
+        refreshProfile,
+        signOut,
+        signInAsGuest,
+      }}
     >
       {children}
-      <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} />
     </UserContext.Provider>
   );
 }

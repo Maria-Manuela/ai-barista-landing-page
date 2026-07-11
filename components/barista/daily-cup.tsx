@@ -2,6 +2,7 @@
 
 import { useCompletion } from "@ai-sdk/react";
 import { useState, useCallback, useEffect } from "react";
+import { toast } from "sonner";
 import {
   CupSoda,
   Flame,
@@ -12,7 +13,6 @@ import {
   Moon,
   Lock,
   Crown,
-  LogIn,
 } from "lucide-react";
 import { UpgradeModal } from "./upgrade-modal";
 import { useUser } from "@/components/auth/user-provider";
@@ -123,7 +123,7 @@ function pickRandom<T>(arr: readonly T[]): T {
 }
 
 export function DailyCup() {
-  const { user, profile, loading: userLoading, refreshProfile, promptLogin } = useUser();
+  const { user, profile, loading: userLoading, refreshProfile, signInAsGuest } = useUser();
 
   const [activeCup, setActiveCup] = useState<CupType | null>(null);
   const [intro, setIntro] = useState<string>("");
@@ -146,7 +146,7 @@ export function DailyCup() {
       try {
         const payload = JSON.parse(err.message) as { error?: string };
         if (payload.error === "unauthenticated") {
-          promptLogin();
+          void signInAsGuest();
           return;
         }
         if (payload.error === "premium_locked") {
@@ -166,16 +166,38 @@ export function DailyCup() {
     },
   });
 
-  // After returning from Stripe Checkout, sync the (webhook-updated) profile.
+  // Handle return from Stripe Checkout (success or cancel).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("checkout") === "success") {
+    const checkout = params.get("checkout");
+    if (!checkout) return;
+
+    // Clean the URL immediately so refresh doesn't re-trigger toasts.
+    window.history.replaceState({}, "", window.location.pathname);
+
+    if (checkout === "cancel") {
+      setModalOpen(false);
+      toast.info("Checkout annulleret — du kan prøve igen når som helst.");
+      return;
+    }
+
+    if (checkout === "success") {
+      setModalOpen(false);
+      toast.success("Velkommen til Barista Pro! Brygger din adgang...");
       void refreshProfile();
       const t = setTimeout(() => void refreshProfile(), 2500);
-      window.history.replaceState({}, "", window.location.pathname);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Browser "back" from Stripe can restore the page with the modal still open.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setModalOpen(false);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
   }, []);
 
   const brew = useCallback(
@@ -189,9 +211,12 @@ export function DailyCup() {
     [complete]
   );
 
-  const serveRandomFree = useCallback(() => {
+  const serveRandomFree = useCallback(async () => {
     if (!user) {
-      promptLogin();
+      // Seamless anonymous sign-in, then serve immediately (session cookie is
+      // set once signInAnonymously resolves).
+      await signInAsGuest();
+      await brew(pickRandom(freeCups));
       return;
     }
     if (limitReached) {
@@ -200,13 +225,12 @@ export function DailyCup() {
       return;
     }
     brew(pickRandom(freeCups));
-  }, [user, limitReached, brew, promptLogin]);
+  }, [user, limitReached, brew, signInAsGuest]);
 
   const servePremium = useCallback(
-    (cup: CupType) => {
+    async (cup: CupType) => {
       if (!user) {
-        promptLogin();
-        return;
+        await signInAsGuest();
       }
       if (!isPro) {
         setModalReason("premium");
@@ -215,21 +239,17 @@ export function DailyCup() {
       }
       brew(cup);
     },
-    [user, isPro, brew, promptLogin]
+    [user, isPro, brew, signInAsGuest]
   );
 
   const config = activeCup ? cupConfig[activeCup] : null;
 
   return (
     <div className="w-full max-w-2xl mx-auto flex flex-col gap-6">
-      {/* Status bar: Pro badge / free counter / login state */}
+      {/* Status bar: Pro badge / free counter */}
       <div className="flex items-center justify-between text-xs">
         {userLoading ? (
           <span className="h-6 w-32 animate-pulse rounded-full bg-secondary" />
-        ) : !user ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 font-medium text-muted-foreground">
-            <LogIn className="h-3.5 w-3.5" /> Log ind for din daglige kop
-          </span>
         ) : isPro ? (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-linear-to-r from-amber-500 to-orange-500 px-3 py-1 font-semibold text-white shadow-sm">
             <Crown className="h-3.5 w-3.5" /> Barista Pro — unlimited
@@ -238,6 +258,7 @@ export function DailyCup() {
           <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 font-medium text-muted-foreground">
             <CupSoda className="h-3.5 w-3.5" />
             {remaining} of {FREE_DAILY_LIMIT} free cups left today
+            {!user && " · ingen signup"}
           </span>
         )}
       </div>
@@ -255,8 +276,6 @@ export function DailyCup() {
         <span>
           {isLoading
             ? "Brewing your cup..."
-            : !user
-            ? "Log ind for din daglige kop"
             : limitReached
             ? "Daily limit reached — Go Pro"
             : serveCount === 0
@@ -277,7 +296,6 @@ export function DailyCup() {
           {!isPro && (
             <button
               onClick={() => {
-                if (!user) return promptLogin();
                 setModalReason("premium");
                 setModalOpen(true);
               }}
@@ -360,7 +378,7 @@ export function DailyCup() {
         onOpenChange={setModalOpen}
         reason={modalReason}
         isLoggedIn={!!user}
-        onRequireLogin={promptLogin}
+        onRequireLogin={signInAsGuest}
       />
     </div>
   );

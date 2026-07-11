@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +16,7 @@ interface UpgradeModalProps {
   onOpenChange: (open: boolean) => void;
   reason?: "limit" | "premium";
   isLoggedIn: boolean;
-  onRequireLogin: () => void;
+  onRequireLogin: () => Promise<void>;
 }
 
 const perks = [
@@ -35,18 +35,29 @@ export function UpgradeModal({
 }: UpgradeModalProps) {
   const [status, setStatus] = useState<"idle" | "redirecting" | "error">("idle");
 
+  // Reset whenever the modal opens/closes so a Stripe back-navigation (bfcache)
+  // can't leave us stuck on "Sender dig til kassen...".
+  useEffect(() => {
+    if (!open) setStatus("idle");
+  }, [open]);
+
+  // Browser "back" from Stripe restores the page from bfcache with stale state.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setStatus("idle");
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   const handleUpgrade = async () => {
-    if (!isLoggedIn) {
-      onOpenChange(false);
-      onRequireLogin();
-      return;
-    }
     setStatus("redirecting");
     try {
+      if (!isLoggedIn) await onRequireLogin();
       const res = await fetch("/api/stripe/checkout", { method: "POST" });
       const data = await res.json();
       if (data.url) {
-        window.location.href = data.url; // Stripe-hosted Checkout (test mode)
+        window.location.href = data.url;
         return;
       }
       setStatus("error");
@@ -56,7 +67,7 @@ export function UpgradeModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => (status === "redirecting" ? null : onOpenChange(o))}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-amber-400 to-orange-500 text-white shadow-lg shadow-orange-500/30">
@@ -103,8 +114,7 @@ export function UpgradeModal({
             </>
           ) : (
             <>
-              <Crown className="h-4 w-4" />
-              {isLoggedIn ? "Go Pro — Upgrade now" : "Log ind for at opgradere"}
+              <Crown className="h-4 w-4" /> Go Pro — Upgrade now
             </>
           )}
         </Button>

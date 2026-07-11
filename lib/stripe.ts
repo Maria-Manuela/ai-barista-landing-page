@@ -11,9 +11,9 @@ export const stripe = new Stripe(
 export const PRO_PRICE_ID = process.env.STRIPE_PRICE_ID ?? "";
 
 export function getSiteUrl() {
-  return (
+  const raw =
     process.env.NEXT_PUBLIC_SITE_URL ??
-    process.env.VERCEL_URL ??
-    "http://localhost:3000"
-  ).replace(/\/$/, "");
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ??
+    "http://localhost:3000";
+  return raw.replace(/\/$/, "");
 }
