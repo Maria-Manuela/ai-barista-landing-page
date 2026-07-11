@@ -105,7 +105,15 @@ export async function POST(req: Request) {
   const genOptions = {
     system: systemPrompts[cupType],
     prompt: promptText,
-    maxOutputTokens: 160,
+    // Gemini 3.x "thinking" tokens share this budget — 160 was cutting off mid-word.
+    maxOutputTokens: 1024,
+    providerOptions: {
+      google: {
+        thinkingConfig: {
+          thinkingLevel: "minimal" as const,
+        },
+      },
+    },
   };
 
   try {

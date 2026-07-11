@@ -30,22 +30,3 @@ export async function createClient() {
     }
   );
 }
-
-/**
- * Privileged client using the service-role key. NEVER expose to the browser.
- * Used by the Stripe webhook to update entitlements regardless of RLS.
- */
-export function createAdminClient() {
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return [];
-        },
-        setAll() {},
-      },
-    }
-  );
-}

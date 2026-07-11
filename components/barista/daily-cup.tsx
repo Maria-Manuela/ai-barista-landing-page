@@ -1,6 +1,5 @@
 "use client";
 
-import { useCompletion } from "@ai-sdk/react";
 import { useState, useCallback, useEffect } from "react";
 import { toast } from "sonner";
 import {
@@ -152,6 +151,8 @@ export function DailyCup() {
 
   const [activeCup, setActiveCup] = useState<CupType | null>(null);
   const [intro, setIntro] = useState<string>("");
+  const [completion, setCompletion] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
   const [serveCount, setServeCount] = useState(0);
   const [guestUsed, setGuestUsed] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
@@ -169,69 +170,82 @@ export function DailyCup() {
     setGuestUsed(getGuestUsage());
   }, []);
 
-  const { completion, isLoading, complete } = useCompletion({
-    api: "/api/daily-cup",
-    onFinish: () => {
-      if (isMember) void refreshProfile();
-      else {
-        incrementGuestUsage();
-        setGuestUsed(getGuestUsage());
-      }
-    },
-    onError: (err) => {
-      const msg = err.message ?? "";
+  // Clear the response card when switching between member and guest (login/logout).
+  useEffect(() => {
+    if (userLoading) return;
+    setActiveCup(null);
+    setIntro("");
+    setCompletion("");
+    setIsLoading(false);
+    if (!isMember) setGuestUsed(getGuestUsage());
+  }, [isMember, userLoading]);
 
-      // Try to parse JSON error from the API response body.
-      try {
-        const payload = JSON.parse(msg) as { error?: string; message?: string };
-        if (payload.error === "signup_required" || payload.error === "premium_locked") {
-          setModalReason("premium");
-          setModalOpen(true);
-          return;
-        }
-        if (payload.error === "limit_reached") {
-          setModalReason("limit");
-          setModalOpen(true);
-          return;
-        }
-        if (payload.error === "ai_quota" || payload.error === "ai_credits") {
-          toast.error(
-            payload.message ??
-              "AI quota reached. Wait a minute and try again."
-          );
-          return;
-        }
-        if (payload.error === "ai_not_configured") {
-          toast.error("AI not configured. Add GOOGLE_GENERATIVE_AI_API_KEY to .env.local");
-          return;
-        }
-        if (payload.message) {
-          toast.error(payload.message);
-          return;
-        }
-      } catch {
-        /* not JSON — check plain text */
+  const handleCupError = useCallback(
+    (payload: { error?: string; message?: string }) => {
+      if (payload.error === "signup_required" || payload.error === "premium_locked") {
+        setModalReason("premium");
+        setModalOpen(true);
+        return;
       }
-
-      if (/quota|RESOURCE_EXHAUSTED|429|rate.?limit/i.test(msg)) {
-        toast.error("Gemini free-tier limit reached. Wait ~1 minute and try again.");
-      } else if (/500|failed|error/i.test(msg)) {
-        toast.error("Could not brew your cup. Check the server logs or your AI API key.");
-      } else {
-        toast.error("Something went wrong brewing your cup. Try again.");
+      if (payload.error === "limit_reached") {
+        setModalReason("limit");
+        setModalOpen(true);
+        return;
       }
+      if (payload.error === "ai_quota" || payload.error === "ai_credits") {
+        toast.error(payload.message ?? "AI quota reached. Wait a minute and try again.");
+        return;
+      }
+      if (payload.error === "ai_not_configured") {
+        toast.error("AI not configured. Add GOOGLE_GENERATIVE_AI_API_KEY to .env.local");
+        return;
+      }
+      toast.error(payload.message ?? "Could not brew your cup. Try again.");
     },
-  });
+    []
+  );
 
   const brew = useCallback(
     async (cup: CupType) => {
       const config = cupConfig[cup];
       setActiveCup(cup);
       setIntro(pickRandom(config.intros));
-      setServeCount((c) => c + 1);
-      await complete("serve", { body: { cupType: cup } });
+      setCompletion("");
+      setIsLoading(true);
+
+      try {
+        const res = await fetch("/api/daily-cup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cupType: cup }),
+        });
+
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({
+            message: `Server error (${res.status})`,
+          }))) as { error?: string; message?: string };
+          handleCupError(payload);
+          setActiveCup(null);
+          return;
+        }
+
+        const text = await res.text();
+        setCompletion(text);
+        setServeCount((c) => c + 1);
+
+        if (isMember) void refreshProfile();
+        else {
+          incrementGuestUsage();
+          setGuestUsed(getGuestUsage());
+        }
+      } catch {
+        toast.error("Network error — could not reach the barista.");
+        setActiveCup(null);
+      } finally {
+        setIsLoading(false);
+      }
     },
-    [complete]
+    [isMember, refreshProfile, handleCupError]
   );
 
   const serveSelected = useCallback(() => {
@@ -279,6 +293,43 @@ export function DailyCup() {
           </span>
         )}
       </div>
+
+      {/* Output card */}
+      {activeCup && config && (completion || isLoading) && (
+        <div
+          key={serveCount}
+          className={`rounded-2xl border-2 ${config.borderColor} bg-card text-card-foreground p-6 flex flex-col gap-4 shadow-sm animate-in fade-in slide-in-from-top-4 duration-500`}
+        >
+          <div className="flex items-center gap-2 flex-wrap">
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full ${config.badgeBg}`}
+            >
+              <span className={config.color}>{config.icon}</span>
+              {config.name}
+            </span>
+            {config.premium && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">
+                Members only
+              </span>
+            )}
+            <span className="text-xs text-muted-foreground">{config.tagline}</span>
+          </div>
+
+          <p className={`text-sm font-semibold leading-snug ${config.color}`}>
+            {intro}
+          </p>
+
+          <div className="text-base leading-relaxed text-foreground min-h-12">
+            {completion || (
+              <span className="inline-flex gap-1 items-center text-muted-foreground text-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Serve button */}
       <button
@@ -351,43 +402,6 @@ export function DailyCup() {
           })}
         </div>
       </div>
-
-      {/* Output card */}
-      {activeCup && config && (completion || isLoading) && (
-        <div
-          key={serveCount}
-          className={`rounded-2xl border-2 ${config.borderColor} bg-card text-card-foreground p-6 flex flex-col gap-4 shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500`}
-        >
-          <div className="flex items-center gap-2 flex-wrap">
-            <span
-              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full ${config.badgeBg}`}
-            >
-              <span className={config.color}>{config.icon}</span>
-              {config.name}
-            </span>
-            {config.premium && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">
-                Members only
-              </span>
-            )}
-            <span className="text-xs text-muted-foreground">{config.tagline}</span>
-          </div>
-
-          <p className={`text-sm font-semibold leading-snug ${config.color}`}>
-            {intro}
-          </p>
-
-          <div className="text-base leading-relaxed text-foreground min-h-12">
-            {completion || (
-              <span className="inline-flex gap-1 items-center text-muted-foreground text-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
-              </span>
-            )}
-          </div>
-        </div>
-      )}
 
       <SignupPromptModal
         open={modalOpen}
