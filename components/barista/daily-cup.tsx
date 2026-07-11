@@ -16,8 +16,7 @@ import {
 } from "lucide-react";
 import { SignupPromptModal } from "./signup-prompt-modal";
 import { useUser } from "@/components/auth/user-provider";
-
-const freeCups = ["wisdom", "gossip", "fuel"] as const;
+import { useCupSelection, freeCups } from "./cup-selection";
 const premiumCups = ["love", "roast", "fortune"] as const;
 type CupType = (typeof freeCups)[number] | (typeof premiumCups)[number];
 
@@ -149,8 +148,8 @@ function incrementGuestUsage(): void {
 export function DailyCup() {
   const { user, profile, loading: userLoading, isMember, refreshProfile, promptSignup } =
     useUser();
+  const { selectedCup } = useCupSelection();
 
-  const [selectedCup, setSelectedCup] = useState<CupType>("wisdom");
   const [activeCup, setActiveCup] = useState<CupType | null>(null);
   const [intro, setIntro] = useState<string>("");
   const [serveCount, setServeCount] = useState(0);
@@ -180,8 +179,11 @@ export function DailyCup() {
       }
     },
     onError: (err) => {
+      const msg = err.message ?? "";
+
+      // Try to parse JSON error from the API response body.
       try {
-        const payload = JSON.parse(err.message) as { error?: string };
+        const payload = JSON.parse(msg) as { error?: string; message?: string };
         if (payload.error === "signup_required" || payload.error === "premium_locked") {
           setModalReason("premium");
           setModalOpen(true);
@@ -192,10 +194,29 @@ export function DailyCup() {
           setModalOpen(true);
           return;
         }
+        if (payload.error === "ai_credits") {
+          toast.error("AI credits exhausted. Check your OpenAI or AI Gateway balance.");
+          return;
+        }
+        if (payload.error === "ai_not_configured") {
+          toast.error("AI not configured. Add OPENAI_API_KEY to .env.local");
+          return;
+        }
+        if (payload.message) {
+          toast.error(payload.message);
+          return;
+        }
       } catch {
+        /* not JSON — check plain text */
+      }
+
+      if (/credit|quota|billing|429|402/i.test(msg)) {
+        toast.error("AI credits exhausted or rate-limited. Check your API balance.");
+      } else if (/500|failed|error/i.test(msg)) {
+        toast.error("Could not brew your cup. Check the server logs or your AI API key.");
+      } else {
         toast.error("Something went wrong brewing your cup. Try again.");
       }
-      if (isMember) void refreshProfile();
     },
   });
 
@@ -254,38 +275,6 @@ export function DailyCup() {
             {remaining} of {FREE_DAILY_LIMIT} free cups left today
           </span>
         )}
-      </div>
-
-      {/* Free cup picker */}
-      <div className="rounded-2xl border border-border bg-secondary/30 p-4">
-        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Pick your cup
-        </p>
-        <div className="grid grid-cols-3 gap-2">
-          {freeCups.map((cup) => {
-            const c = cupConfig[cup];
-            const selected = selectedCup === cup;
-            return (
-              <button
-                key={cup}
-                type="button"
-                onClick={() => setSelectedCup(cup)}
-                disabled={isLoading}
-                className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition-all disabled:opacity-60 ${
-                  selected
-                    ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary/30"
-                    : "border-border bg-card hover:border-primary/40"
-                }`}
-              >
-                <span className={c.color}>{c.icon}</span>
-                <span className="text-xs font-semibold leading-tight">{c.name}</span>
-                <span className="text-[10px] leading-tight text-muted-foreground">
-                  {c.tagline}
-                </span>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       {/* Serve button */}

@@ -4,6 +4,7 @@ import {
   toUIMessageStream,
 } from "ai";
 import { createClient } from "@/lib/supabase/server";
+import { getCupModel, getAiConfigHint } from "@/lib/ai-model";
 
 export const maxDuration = 30;
 
@@ -81,37 +82,47 @@ export async function POST(req: Request) {
     );
   }
 
-  // Members: enforce via database (unlimited for members, RPC still tracks).
-  // Guests: allowed for free cups only — no server-side usage tracking.
-  if (isMember) {
-    const { data: usage, error: usageError } = await supabase.rpc(
-      "record_cup_usage",
-      { p_is_premium: isPremium }
-    );
+  // Members get unlimited cups — skip the usage RPC entirely.
+  // Guests: allowed for free cups, limit tracked client-side.
 
-    if (usageError) {
-      console.error("record_cup_usage error:", usageError.message);
-      // Don't block members if RPC is missing — allow the cup through.
-    } else if (usage && !usage.allowed) {
-      const status = usage.reason === "premium_locked" ? 403 : 402;
-      return Response.json(
-        {
-          error: usage.reason ?? "not_allowed",
-          remaining: usage.remaining ?? 0,
-        },
-        { status }
-      );
-    }
+  if (!process.env.OPENAI_API_KEY && !process.env.AI_GATEWAY_API_KEY) {
+    console.error("AI config missing:", getAiConfigHint());
+    return Response.json(
+      {
+        error: "ai_not_configured",
+        message:
+          "No AI API key found. Add OPENAI_API_KEY or AI_GATEWAY_API_KEY to .env.local",
+      },
+      { status: 503 }
+    );
   }
 
-  const result = streamText({
-    model: "openai/gpt-4o-mini",
-    system: systemPrompts[cupType],
-    prompt: `Serve me a fresh cup right now. Be creative, keep it totally fresh — do NOT repeat yourself or use the same opening. No intro line, just jump straight into the content.`,
-    maxOutputTokens: 160,
-  });
+  try {
+    const result = streamText({
+      model: getCupModel(),
+      system: systemPrompts[cupType],
+      prompt: `Serve me a fresh cup right now. Be creative, keep it totally fresh — do NOT repeat yourself or use the same opening. No intro line, just jump straight into the content.`,
+      maxOutputTokens: 160,
+    });
 
-  return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ stream: result.stream }),
-  });
+    return createUIMessageStreamResponse({
+      stream: toUIMessageStream({ stream: result.stream }),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown AI error";
+    console.error("streamText failed:", message);
+
+    const isCredits =
+      /credit|quota|billing|insufficient|rate.?limit|429|402/i.test(message);
+
+    return Response.json(
+      {
+        error: isCredits ? "ai_credits" : "ai_error",
+        message: isCredits
+          ? "AI credits exhausted or rate-limited. Check your OpenAI or AI Gateway balance."
+          : `AI request failed: ${message}`,
+      },
+      { status: isCredits ? 402 : 500 }
+    );
+  }
 }

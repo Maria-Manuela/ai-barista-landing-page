@@ -1,11 +1,14 @@
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AuthButton } from "@/components/auth/auth-button";
 import { DailyCup } from "@/components/barista/daily-cup";
+import { CupHeroButtons } from "@/components/barista/cup-hero-buttons";
+import { CupSelectionProvider } from "@/components/barista/cup-selection";
 import Image from "next/image";
-import { Coffee, MapPin, Clock, Sparkles, MessageCircle, BookOpen } from "lucide-react";
+import { Coffee, MapPin, Clock } from "lucide-react";
 
 export default function Home() {
   return (
+    <CupSelectionProvider>
     <div className="min-h-screen bg-background text-foreground font-sans">
       <header className="sticky top-0 z-50 flex items-center justify-between px-6 py-4 border-b border-border bg-background/80 backdrop-blur-sm">
         <div className="flex items-center gap-2">
@@ -54,17 +57,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="flex flex-wrap justify-center gap-2 mt-2">
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-              <Sparkles className="w-3 h-3" /> Cup of Wisdom
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300">
-              <MessageCircle className="w-3 h-3" /> Cup of Gossip
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
-              <BookOpen className="w-3 h-3" /> Read Your Cup
-            </span>
-          </div>
+          <CupHeroButtons />
         </section>
 
         <section className="px-6 pb-16 flex justify-center">
@@ -128,5 +121,6 @@ export default function Home() {
         <span>Brewed with coffee and love</span>
       </footer>
     </div>
+    </CupSelectionProvider>
   );
 }
