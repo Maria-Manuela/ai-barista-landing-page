@@ -194,12 +194,15 @@ export function DailyCup() {
           setModalOpen(true);
           return;
         }
-        if (payload.error === "ai_credits") {
-          toast.error("AI credits exhausted. Check your OpenAI or AI Gateway balance.");
+        if (payload.error === "ai_quota" || payload.error === "ai_credits") {
+          toast.error(
+            payload.message ??
+              "AI quota reached. Wait a minute and try again."
+          );
           return;
         }
         if (payload.error === "ai_not_configured") {
-          toast.error("AI not configured. Add OPENAI_API_KEY to .env.local");
+          toast.error("AI not configured. Add GOOGLE_GENERATIVE_AI_API_KEY to .env.local");
           return;
         }
         if (payload.message) {
@@ -210,8 +213,8 @@ export function DailyCup() {
         /* not JSON — check plain text */
       }
 
-      if (/credit|quota|billing|429|402/i.test(msg)) {
-        toast.error("AI credits exhausted or rate-limited. Check your API balance.");
+      if (/quota|RESOURCE_EXHAUSTED|429|rate.?limit/i.test(msg)) {
+        toast.error("Gemini free-tier limit reached. Wait ~1 minute and try again.");
       } else if (/500|failed|error/i.test(msg)) {
         toast.error("Could not brew your cup. Check the server logs or your AI API key.");
       } else {

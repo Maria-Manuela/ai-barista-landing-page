@@ -1,10 +1,14 @@
-import {
-  createUIMessageStreamResponse,
-  streamText,
-  toUIMessageStream,
-} from "ai";
+import { generateText } from "ai";
+import { google } from "@ai-sdk/google";
 import { createClient } from "@/lib/supabase/server";
-import { getCupModel, getAiConfigHint } from "@/lib/ai-model";
+import {
+  getCupModel,
+  getAiConfigHint,
+  hasAiKey,
+  getGeminiModelsToTry,
+  isQuotaError,
+  isRetryableModelError,
+} from "@/lib/ai-model";
 
 export const maxDuration = 30;
 
@@ -85,44 +89,73 @@ export async function POST(req: Request) {
   // Members get unlimited cups — skip the usage RPC entirely.
   // Guests: allowed for free cups, limit tracked client-side.
 
-  if (!process.env.OPENAI_API_KEY && !process.env.AI_GATEWAY_API_KEY) {
+  if (!hasAiKey()) {
     console.error("AI config missing:", getAiConfigHint());
     return Response.json(
       {
         error: "ai_not_configured",
         message:
-          "No AI API key found. Add OPENAI_API_KEY or AI_GATEWAY_API_KEY to .env.local",
+          "No AI API key found. Add GOOGLE_GENERATIVE_AI_API_KEY to .env.local (free at aistudio.google.com/apikey)",
       },
       { status: 503 }
     );
   }
 
+  const promptText = `Serve me a fresh cup right now. Be creative, keep it totally fresh — do NOT repeat yourself or use the same opening. No intro line, just jump straight into the content.`;
+  const genOptions = {
+    system: systemPrompts[cupType],
+    prompt: promptText,
+    maxOutputTokens: 160,
+  };
+
   try {
-    const result = streamText({
+    // Gemini: try multiple models if one hits free-tier quota.
+    if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      let lastError = "All Gemini models rate-limited";
+      for (const modelName of getGeminiModelsToTry()) {
+        try {
+          const { text } = await generateText({
+            ...genOptions,
+            model: google(modelName),
+          });
+          return new Response(text, {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          lastError = message;
+          if (isRetryableModelError(message)) {
+            console.warn(`Gemini ${modelName} unavailable, trying next...`);
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw new Error(lastError);
+    }
+
+    const { text } = await generateText({
+      ...genOptions,
       model: getCupModel(),
-      system: systemPrompts[cupType],
-      prompt: `Serve me a fresh cup right now. Be creative, keep it totally fresh — do NOT repeat yourself or use the same opening. No intro line, just jump straight into the content.`,
-      maxOutputTokens: 160,
     });
 
-    return createUIMessageStreamResponse({
-      stream: toUIMessageStream({ stream: result.stream }),
+    return new Response(text, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown AI error";
-    console.error("streamText failed:", message);
+    console.error("generateText failed:", message);
 
-    const isCredits =
-      /credit|quota|billing|insufficient|rate.?limit|429|402/i.test(message);
+    const isQuota = isQuotaError(message);
 
     return Response.json(
       {
-        error: isCredits ? "ai_credits" : "ai_error",
-        message: isCredits
-          ? "AI credits exhausted or rate-limited. Check your OpenAI or AI Gateway balance."
+        error: isQuota ? "ai_quota" : "ai_error",
+        message: isQuota
+          ? "Gemini free-tier limit reached on all models. Wait ~1 minute and try again."
           : `AI request failed: ${message}`,
       },
-      { status: isCredits ? 402 : 500 }
+      { status: isQuota ? 429 : 500 }
     );
   }
 }
