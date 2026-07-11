@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
+import { SignupDialog } from "./signup-dialog";
 
 export interface Profile {
   id: string;
@@ -16,11 +17,10 @@ interface UserContextValue {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
-  signingIn: boolean;
+  isMember: boolean;
   refreshProfile: () => Promise<void>;
   signOut: () => Promise<void>;
-  /** Signs the visitor in as an anonymous guest (no email required). */
-  signInAsGuest: () => Promise<void>;
+  promptSignup: (mode?: "signup" | "signin") => void;
 }
 
 const UserContext = createContext<UserContextValue | undefined>(undefined);
@@ -29,13 +29,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [signingIn, setSigningIn] = useState(false);
-  const signingInRef = useRef(false);
+  const [signupOpen, setSignupOpen] = useState(false);
+  const [signupMode, setSignupMode] = useState<"signup" | "signin">("signup");
+
+  const isMember = !!user && !user.is_anonymous;
 
   useEffect(() => {
     const supabase = createClient();
     if (!supabase) {
-      setLoading(false); // Supabase not configured yet — act as logged out.
+      setLoading(false);
       return;
     }
 
@@ -91,19 +93,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     setProfile(null);
   };
 
-  const signInAsGuest = async () => {
-    if (signingInRef.current || user) return;
-    const supabase = createClient();
-    if (!supabase) return;
-    signingInRef.current = true;
-    setSigningIn(true);
-    try {
-      await supabase.auth.signInAnonymously();
-      // onAuthStateChange picks up the new session and loads the profile.
-    } finally {
-      signingInRef.current = false;
-      setSigningIn(false);
-    }
+  const promptSignup = (mode: "signup" | "signin" = "signup") => {
+    setSignupMode(mode);
+    setSignupOpen(true);
   };
 
   return (
@@ -112,13 +104,18 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         user,
         profile,
         loading,
-        signingIn,
+        isMember,
         refreshProfile,
         signOut,
-        signInAsGuest,
+        promptSignup,
       }}
     >
       {children}
+      <SignupDialog
+        open={signupOpen}
+        onOpenChange={setSignupOpen}
+        defaultMode={signupMode}
+      />
     </UserContext.Provider>
   );
 }

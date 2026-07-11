@@ -27,12 +27,12 @@ Invent funny fictional characters like "Karen fra Birk", "Thomas med el-løbehju
 Do NOT use hashtags. Do NOT use emojis. Just raw, punchy fictional Danglish drama.
 Example: "Okay so hør her — Karen fra gågaden was spotted buying THREE kaffekapsler at Føtex yesterday. THREE. Hendes mand ved det ikke. Nobody does. Except me. And now you."`,
 
-  fuel: `You are an extremely aggressive, funny, and hyped AI barista at a virtual coffee shop in Herning, Denmark.
-You speak in "Danglish" — a hilarious and natural mix of Danish and English woven together in every sentence.
-You deliver over-the-top, aggressive, funny motivation. Keep it 3 to 5 sentences MAXIMUM. No more.
-Reference Herning local spots: MCH, el-løbehjul, gågaden, Messecenter, Birk Centerpark.
-Do NOT use hashtags. Do NOT use emojis. Just raw, loud, punchy Danglish motivation.
-Example: "HVA SKER DER. Du er ikke bare en person — du er en MASKINE fra Herning. Stå op. Gå ud. Tag el-løbehjulet og CRUSH it. MCH cannot hold you back. GO GO GO."`,
+  fuel: `You are a warm, perceptive, and funny AI barista at a virtual coffee shop in Herning, Denmark.
+You speak in "Danglish" — a natural mix of Danish and English woven together in some sentences (not every sentence needs Danish).
+You "read the customer's cup" — like reading tea leaves, but coffee. Give them a personal, oddly specific, funny message that feels written just for them. Reflective but not preachy. Keep it 3 to 5 sentences MAXIMUM.
+Reference Herning local spots when it fits: MCH, el-løbehjul, gågaden, Messecenter, Birk Centerpark.
+Do NOT use hashtags. Do NOT use emojis.
+Example: "Your cup says you're running on three hours of sleep and pure stubbornness — respect. Something good is brewing this week, maybe på gågaden, maybe in your inbox. Drink slow. The universe isn't rushing you, selvom det føles sådan."`,
 
   love: `You are an extremely sassy, warm, and funny AI barista at a virtual coffee shop in Herning, Denmark.
 You speak in "Danglish" — a hilarious and natural mix of Danish and English woven together in every sentence.
@@ -62,46 +62,46 @@ export async function POST(req: Request) {
   const cupType: CupType =
     body.cupType && cups.includes(body.cupType)
       ? (body.cupType as CupType)
-      : freeCups[Math.floor(Math.random() * freeCups.length)];
+      : freeCups[0];
 
   const isPremium = !freeCups.includes(cupType as (typeof freeCups)[number]);
 
-  // Require an authenticated user and enforce the freemium quota / Pro gate
-  // atomically in the database before spending any tokens.
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) {
+  const isMember = !!user && !user.is_anonymous;
+
+  // Premium cups require a signed-up member.
+  if (isPremium && !isMember) {
     return Response.json(
-      { error: "unauthenticated", message: "Log ind for at få din kop." },
-      { status: 401 }
+      { error: "signup_required", message: "Sign up to unlock this cup." },
+      { status: 403 }
     );
   }
 
-  const { data: usage, error: usageError } = await supabase.rpc(
-    "record_cup_usage",
-    { p_is_premium: isPremium }
-  );
-
-  if (usageError) {
-    return Response.json(
-      { error: "usage_error", message: usageError.message },
-      { status: 500 }
+  // Members: enforce via database (unlimited for members, RPC still tracks).
+  // Guests: allowed for free cups only — no server-side usage tracking.
+  if (isMember) {
+    const { data: usage, error: usageError } = await supabase.rpc(
+      "record_cup_usage",
+      { p_is_premium: isPremium }
     );
-  }
 
-  if (!usage?.allowed) {
-    const status = usage?.reason === "premium_locked" ? 403 : 402;
-    return Response.json(
-      {
-        error: usage?.reason ?? "not_allowed",
-        remaining: usage?.remaining ?? 0,
-        is_pro: usage?.is_pro ?? false,
-      },
-      { status }
-    );
+    if (usageError) {
+      console.error("record_cup_usage error:", usageError.message);
+      // Don't block members if RPC is missing — allow the cup through.
+    } else if (usage && !usage.allowed) {
+      const status = usage.reason === "premium_locked" ? 403 : 402;
+      return Response.json(
+        {
+          error: usage.reason ?? "not_allowed",
+          remaining: usage.remaining ?? 0,
+        },
+        { status }
+      );
+    }
   }
 
   const result = streamText({

@@ -10,8 +10,8 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'AI Barista | Herning Kaffe — Din daglige Danglish cup',
-  description: 'A sassy AI barista serving random Daily Cups in Danglish — Cup of Wisdom, Gossip, or Fuel. Straight from the virtual coffee shop in Herning, Denmark.',
+  title: 'AI Barista | Herning Kaffe — Your daily cup',
+  description: 'A sassy AI barista serving Daily Cups — wisdom, gossip, or a personal read. From the virtual coffee shop in Herning, Denmark.',
   generator: 'v0.app',
   keywords: ['AI barista', 'Danglish', 'Herning', 'coffee', 'daily cup', 'humor'],
   icons: {

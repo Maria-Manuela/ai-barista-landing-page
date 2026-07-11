@@ -12,9 +12,9 @@ import {
   Heart,
   Moon,
   Lock,
-  Crown,
+  BookOpen,
 } from "lucide-react";
-import { UpgradeModal } from "./upgrade-modal";
+import { SignupPromptModal } from "./signup-prompt-modal";
 import { useUser } from "@/components/auth/user-provider";
 
 const freeCups = ["wisdom", "gossip", "fuel"] as const;
@@ -22,6 +22,7 @@ const premiumCups = ["love", "roast", "fortune"] as const;
 type CupType = (typeof freeCups)[number] | (typeof premiumCups)[number];
 
 const FREE_DAILY_LIMIT = 3;
+const GUEST_USAGE_KEY = "barista_guest_usage";
 
 interface CupConfig {
   name: string;
@@ -43,9 +44,9 @@ const cupConfig: Record<CupType, CupConfig> = {
     borderColor: "border-amber-400/40",
     badgeBg: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
     intros: [
-      "Wham! You got a Cup of Wisdom! Drop the løber, listen here...",
-      "HOLD UP! Det er: Cup of Wisdom! Sæt kaffen ned og hør efter...",
-      "Bing bong! Your Daily Cup is: Cup of Wisdom! Gågaden can wait...",
+      "Wham! You got a Cup of Wisdom! Drop everything and listen...",
+      "Hold up — Cup of Wisdom incoming. Put the coffee down.",
+      "Bing bong! Your Cup of Wisdom is ready. The world can wait.",
     ],
   },
   gossip: {
@@ -56,36 +57,36 @@ const cupConfig: Record<CupType, CupConfig> = {
     borderColor: "border-rose-400/40",
     badgeBg: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300",
     intros: [
-      "Boom! Your Daily Cup is: Cup of Gossip! High hair, low glass, listen to this...",
-      "OH. MIT. GOD. Det er: Cup of Gossip! MCH har ikke set drama som dette...",
-      "SHHH! Kom tættere på, for this is JUICY... Din Cup of Gossip er klar!",
+      "Boom! Cup of Gossip — lean in, this is juicy...",
+      "Oh. My. God. Cup of Gossip. MCH has never seen drama like this.",
+      "Shhh! Come closer... your Cup of Gossip is served.",
     ],
   },
   fuel: {
-    name: "Cup of Fuel",
-    tagline: "Aggressive, funny motivation",
-    icon: <Flame className="w-5 h-5" />,
+    name: "Read Your Cup",
+    tagline: "A message written just for you",
+    icon: <BookOpen className="w-5 h-5" />,
     color: "text-orange-600 dark:text-orange-400",
     borderColor: "border-orange-400/40",
     badgeBg: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
     intros: [
-      "LET'S GO! Your Daily Cup is: Cup of Fuel! Spænd seletøjet, for now we GRIND...",
-      "BRRR! Det er: Cup of Fuel! El-løbehjul energy, ACTIVATE!",
-      "GAME ON! Your Daily Cup is: Cup of Fuel! Herning did not raise a quitter...",
+      "Your cup has been read. Here's what it says...",
+      "The grounds have spoken — Read Your Cup:",
+      "Slow down. Sip this. Read Your Cup:",
     ],
   },
   love: {
     name: "Cup of Love",
-    tagline: "Bold Danglish dating advice",
+    tagline: "Bold dating advice",
     icon: <Heart className="w-5 h-5" />,
     color: "text-pink-600 dark:text-pink-400",
     borderColor: "border-pink-400/40",
     badgeBg: "bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300",
     premium: true,
     intros: [
-      "Ahh, l'amour! Din Cup of Love er klar — sæt dig ned, skat...",
-      "Cupid tog el-løbehjulet! It's a Cup of Love, listen carefully...",
-      "Hjerte-alarm! Your Cup of Love is served, kæreste...",
+      "Ah, love! Your Cup of Love is ready — sit down, darling...",
+      "Cupid called. It's a Cup of Love. Listen carefully.",
+      "Heart alarm! Your Cup of Love is served.",
     ],
   },
   roast: {
@@ -97,9 +98,9 @@ const cupConfig: Record<CupType, CupConfig> = {
     badgeBg: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300",
     premium: true,
     intros: [
-      "Uh oh. Du bestilte en Cup of Roast. Håber du kan tåle varmen...",
-      "Dark roast, ekstra brutal! Your Cup of Roast is brewing...",
-      "You asked for it — Cup of Roast, ingen mælk til at blødgøre det...",
+      "Uh oh. You ordered a Cup of Roast. Hope you can take the heat...",
+      "Dark roast, extra brutal. Your Cup of Roast is brewing...",
+      "You asked for it — Cup of Roast, no milk to soften it.",
     ],
   },
   fortune: {
@@ -111,9 +112,9 @@ const cupConfig: Record<CupType, CupConfig> = {
     badgeBg: "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
     premium: true,
     intros: [
-      "Jeg ser noget i grumset... din Cup of Fortune afsløres nu...",
-      "Krystalkuglen er en kaffekop i dag — Cup of Fortune, kommer nu...",
-      "Skæbnen kalder fra Birk Centerpark... your Cup of Fortune awaits...",
+      "I see something in the grounds... your Cup of Fortune reveals itself.",
+      "The crystal ball is a coffee cup today — Cup of Fortune, coming up.",
+      "Fate calls from Birk Centerpark... your Cup of Fortune awaits.",
     ],
   },
 };
@@ -122,34 +123,66 @@ function pickRandom<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export function DailyCup() {
-  const { user, profile, loading: userLoading, refreshProfile, signInAsGuest } = useUser();
+function todayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
+function getGuestUsage(): number {
+  try {
+    const raw = localStorage.getItem(GUEST_USAGE_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw) as { date: string; count: number };
+    return parsed.date === todayKey() ? parsed.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function incrementGuestUsage(): void {
+  const count = getGuestUsage() + 1;
+  localStorage.setItem(
+    GUEST_USAGE_KEY,
+    JSON.stringify({ date: todayKey(), count })
+  );
+}
+
+export function DailyCup() {
+  const { user, profile, loading: userLoading, isMember, refreshProfile, promptSignup } =
+    useUser();
+
+  const [selectedCup, setSelectedCup] = useState<CupType>("wisdom");
   const [activeCup, setActiveCup] = useState<CupType | null>(null);
   const [intro, setIntro] = useState<string>("");
   const [serveCount, setServeCount] = useState(0);
+  const [guestUsed, setGuestUsed] = useState(0);
   const [modalOpen, setModalOpen] = useState(false);
   const [modalReason, setModalReason] = useState<"limit" | "premium">("premium");
 
-  const isPro = !!profile?.is_pro;
-  const usedToday = profile?.cups_used_today ?? 0;
-  const remaining = Math.max(0, FREE_DAILY_LIMIT - usedToday);
-  const limitReached = !!user && !isPro && remaining <= 0;
+  const memberUsed = profile?.cups_used_today ?? 0;
+  const usedToday = isMember ? memberUsed : guestUsed;
+  const remaining = isMember
+    ? null
+    : Math.max(0, FREE_DAILY_LIMIT - usedToday);
+  const limitReached = !isMember && (remaining ?? 0) <= 0;
+
+  // Hydrate guest usage from localStorage on mount.
+  useEffect(() => {
+    setGuestUsed(getGuestUsage());
+  }, []);
 
   const { completion, isLoading, complete } = useCompletion({
     api: "/api/daily-cup",
     onFinish: () => {
-      void refreshProfile();
+      if (isMember) void refreshProfile();
+      else {
+        incrementGuestUsage();
+        setGuestUsed(getGuestUsage());
+      }
     },
     onError: (err) => {
-      // Server-side gate fired (defense in depth). Parse the reason and react.
       try {
         const payload = JSON.parse(err.message) as { error?: string };
-        if (payload.error === "unauthenticated") {
-          void signInAsGuest();
-          return;
-        }
-        if (payload.error === "premium_locked") {
+        if (payload.error === "signup_required" || payload.error === "premium_locked") {
           setModalReason("premium");
           setModalOpen(true);
           return;
@@ -160,45 +193,11 @@ export function DailyCup() {
           return;
         }
       } catch {
-        /* non-JSON error — ignore */
+        toast.error("Something went wrong brewing your cup. Try again.");
       }
-      void refreshProfile();
+      if (isMember) void refreshProfile();
     },
   });
-
-  // Handle return from Stripe Checkout (success or cancel).
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const checkout = params.get("checkout");
-    if (!checkout) return;
-
-    // Clean the URL immediately so refresh doesn't re-trigger toasts.
-    window.history.replaceState({}, "", window.location.pathname);
-
-    if (checkout === "cancel") {
-      setModalOpen(false);
-      toast.info("Checkout annulleret — du kan prøve igen når som helst.");
-      return;
-    }
-
-    if (checkout === "success") {
-      setModalOpen(false);
-      toast.success("Velkommen til Barista Pro! Brygger din adgang...");
-      void refreshProfile();
-      const t = setTimeout(() => void refreshProfile(), 2500);
-      return () => clearTimeout(t);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Browser "back" from Stripe can restore the page with the modal still open.
-  useEffect(() => {
-    const onPageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) setModalOpen(false);
-    };
-    window.addEventListener("pageshow", onPageShow);
-    return () => window.removeEventListener("pageshow", onPageShow);
-  }, []);
 
   const brew = useCallback(
     async (cup: CupType) => {
@@ -211,12 +210,10 @@ export function DailyCup() {
     [complete]
   );
 
-  const serveRandomFree = useCallback(async () => {
-    if (!user) {
-      // Seamless anonymous sign-in, then serve immediately (session cookie is
-      // set once signInAnonymously resolves).
-      await signInAsGuest();
-      await brew(pickRandom(freeCups));
+  const serveSelected = useCallback(() => {
+    if (cupConfig[selectedCup].premium && !isMember) {
+      setModalReason("premium");
+      setModalOpen(true);
       return;
     }
     if (limitReached) {
@@ -224,50 +221,78 @@ export function DailyCup() {
       setModalOpen(true);
       return;
     }
-    brew(pickRandom(freeCups));
-  }, [user, limitReached, brew, signInAsGuest]);
+    brew(selectedCup);
+  }, [selectedCup, isMember, limitReached, brew]);
 
   const servePremium = useCallback(
-    async (cup: CupType) => {
-      if (!user) {
-        await signInAsGuest();
-      }
-      if (!isPro) {
+    (cup: CupType) => {
+      if (!isMember) {
         setModalReason("premium");
         setModalOpen(true);
         return;
       }
       brew(cup);
     },
-    [user, isPro, brew, signInAsGuest]
+    [isMember, brew]
   );
 
   const config = activeCup ? cupConfig[activeCup] : null;
 
   return (
     <div className="w-full max-w-2xl mx-auto flex flex-col gap-6">
-      {/* Status bar: Pro badge / free counter */}
+      {/* Status bar */}
       <div className="flex items-center justify-between text-xs">
         {userLoading ? (
           <span className="h-6 w-32 animate-pulse rounded-full bg-secondary" />
-        ) : isPro ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-linear-to-r from-amber-500 to-orange-500 px-3 py-1 font-semibold text-white shadow-sm">
-            <Crown className="h-3.5 w-3.5" /> Barista Pro — unlimited
+        ) : isMember ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 font-medium text-primary">
+            <CupSoda className="h-3.5 w-3.5" /> Member — unlimited cups
           </span>
         ) : (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-3 py-1 font-medium text-muted-foreground">
             <CupSoda className="h-3.5 w-3.5" />
             {remaining} of {FREE_DAILY_LIMIT} free cups left today
-            {!user && " · ingen signup"}
           </span>
         )}
       </div>
 
-      {/* Serve button (random free cup) */}
+      {/* Free cup picker */}
+      <div className="rounded-2xl border border-border bg-secondary/30 p-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Pick your cup
+        </p>
+        <div className="grid grid-cols-3 gap-2">
+          {freeCups.map((cup) => {
+            const c = cupConfig[cup];
+            const selected = selectedCup === cup;
+            return (
+              <button
+                key={cup}
+                type="button"
+                onClick={() => setSelectedCup(cup)}
+                disabled={isLoading}
+                className={`flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition-all disabled:opacity-60 ${
+                  selected
+                    ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary/30"
+                    : "border-border bg-card hover:border-primary/40"
+                }`}
+              >
+                <span className={c.color}>{c.icon}</span>
+                <span className="text-xs font-semibold leading-tight">{c.name}</span>
+                <span className="text-[10px] leading-tight text-muted-foreground">
+                  {c.tagline}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Serve button */}
       <button
-        onClick={serveRandomFree}
+        onClick={serveSelected}
         disabled={isLoading}
-        aria-label="Serve me a Daily Cup"
+        aria-label="Serve my cup"
         className="group relative w-full rounded-2xl bg-primary text-primary-foreground font-semibold text-lg py-5 px-8 flex items-center justify-center gap-3 transition-all duration-200 hover:opacity-90 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed shadow-lg hover:shadow-primary/30"
       >
         <CupSoda
@@ -277,9 +302,9 @@ export function DailyCup() {
           {isLoading
             ? "Brewing your cup..."
             : limitReached
-            ? "Daily limit reached — Go Pro"
+            ? "Daily limit reached — sign up free"
             : serveCount === 0
-            ? "Serve Me My Daily Cup"
+            ? "Serve My Cup"
             : "Serve Another Cup"}
         </span>
         {isLoading && (
@@ -287,21 +312,22 @@ export function DailyCup() {
         )}
       </button>
 
-      {/* Premium secret menu */}
+      {/* Members-only secret menu */}
       <div className="rounded-2xl border border-border bg-secondary/30 p-4">
         <div className="mb-3 flex items-center justify-between">
           <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Crown className="h-3.5 w-3.5 text-amber-500" /> Secret Pro menu
+            <Lock className="h-3.5 w-3.5" /> Secret menu — members only
           </span>
-          {!isPro && (
+          {!isMember && (
             <button
+              type="button"
               onClick={() => {
                 setModalReason("premium");
                 setModalOpen(true);
               }}
-              className="text-xs font-semibold text-amber-600 hover:underline dark:text-amber-400"
+              className="text-xs font-semibold text-primary hover:underline"
             >
-              Unlock all
+              Sign up to unlock
             </button>
           )}
         </div>
@@ -311,11 +337,12 @@ export function DailyCup() {
             return (
               <button
                 key={cup}
+                type="button"
                 onClick={() => servePremium(cup)}
                 disabled={isLoading}
-                className="group relative flex flex-col items-center gap-1.5 rounded-xl border border-border bg-card p-3 text-center transition-all hover:border-amber-400/60 hover:shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+                className="group relative flex flex-col items-center gap-1.5 rounded-xl border border-border bg-card p-3 text-center transition-all hover:border-primary/40 hover:shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {!isPro && (
+                {!isMember && (
                   <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-secondary text-muted-foreground">
                     <Lock className="h-3 w-3" />
                   </span>
@@ -339,8 +366,7 @@ export function DailyCup() {
           key={serveCount}
           className={`rounded-2xl border-2 ${config.borderColor} bg-card text-card-foreground p-6 flex flex-col gap-4 shadow-sm animate-in fade-in slide-in-from-bottom-4 duration-500`}
         >
-          {/* Cup badge */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span
               className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full ${config.badgeBg}`}
             >
@@ -348,19 +374,17 @@ export function DailyCup() {
               {config.name}
             </span>
             {config.premium && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-linear-to-r from-amber-500 to-orange-500 px-2 py-1 text-[10px] font-semibold text-white">
-                <Crown className="h-2.5 w-2.5" /> Pro
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary">
+                Members only
               </span>
             )}
             <span className="text-xs text-muted-foreground">{config.tagline}</span>
           </div>
 
-          {/* Intro line */}
           <p className={`text-sm font-semibold leading-snug ${config.color}`}>
             {intro}
           </p>
 
-          {/* Streamed content */}
           <div className="text-base leading-relaxed text-foreground min-h-12">
             {completion || (
               <span className="inline-flex gap-1 items-center text-muted-foreground text-sm">
@@ -373,12 +397,11 @@ export function DailyCup() {
         </div>
       )}
 
-      <UpgradeModal
+      <SignupPromptModal
         open={modalOpen}
         onOpenChange={setModalOpen}
         reason={modalReason}
-        isLoggedIn={!!user}
-        onRequireLogin={signInAsGuest}
+        onSignup={() => promptSignup("signup")}
       />
     </div>
   );
