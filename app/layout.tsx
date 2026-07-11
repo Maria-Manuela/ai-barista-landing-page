@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
+import { UserProvider } from '@/components/auth/user-provider'
 import './globals.css'
 
 const _geist = Geist({ subsets: ["latin"] });
@@ -45,7 +46,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <UserProvider>{children}</UserProvider>
         </ThemeProvider>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>

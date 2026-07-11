@@ -1,4 +1,5 @@
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AuthButton } from "@/components/auth/auth-button";
 import { DailyCup } from "@/components/barista/daily-cup";
 import Image from "next/image";
 import { Coffee, MapPin, Clock, Sparkles, MessageCircle, Flame } from "lucide-react";
@@ -12,7 +13,10 @@ export default function Home() {
           <Coffee className="w-5 h-5 text-primary" />
           <span className="font-semibold text-sm tracking-wide">Herning Kaffe</span>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <AuthButton />
+          <ThemeToggle />
+        </div>
       </header>
 
       <main>
