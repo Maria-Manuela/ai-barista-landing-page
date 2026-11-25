@@ -1,6 +1,6 @@
 import { ThemeToggle } from "@/components/theme-toggle";
+import { DemoGate } from "@/components/barista/demo-gate";
 import { AuthButton } from "@/components/auth/auth-button";
-import { DailyCup } from "@/components/barista/daily-cup";
 import { CupHeroButtons } from "@/components/barista/cup-hero-buttons";
 import { CupSelectionProvider } from "@/components/barista/cup-selection";
 import Image from "next/image";
@@ -61,7 +61,7 @@ export default function Home() {
         </section>
 
         <section className="px-6 pb-16 flex justify-center">
-          <DailyCup />
+          <DemoGate />
         </section>
 
         <div className="border-t border-border mx-6" />
