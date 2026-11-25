@@ -1,12 +1,19 @@
+import { generateText } from "ai";
+import { google } from "@ai-sdk/google";
+import { createClient } from "@/lib/supabase/server";
 import {
-  createUIMessageStreamResponse,
-  streamText,
-  toUIMessageStream,
-} from "ai";
+  getCupModel,
+  getAiConfigHint,
+  hasAiKey,
+  getGeminiModelsToTry,
+  isQuotaError,
+  isRetryableModelError,
+} from "@/lib/ai-model";
 
 export const maxDuration = 30;
 
-const cups = ["wisdom", "gossip", "fuel"] as const;
+const freeCups = ["wisdom", "gossip", "fuel"] as const;
+const cups = [...freeCups, "love", "roast", "fortune"] as const;
 type CupType = (typeof cups)[number];
 
 const systemPrompts: Record<CupType, string> = {
@@ -25,12 +32,33 @@ Invent funny fictional characters like "Karen fra Birk", "Thomas med el-løbehju
 Do NOT use hashtags. Do NOT use emojis. Just raw, punchy fictional Danglish drama.
 Example: "Okay so hør her — Karen fra gågaden was spotted buying THREE kaffekapsler at Føtex yesterday. THREE. Hendes mand ved det ikke. Nobody does. Except me. And now you."`,
 
-  fuel: `You are an extremely aggressive, funny, and hyped AI barista at a virtual coffee shop in Herning, Denmark.
+  fuel: `You are a warm, perceptive, and funny AI barista at a virtual coffee shop in Herning, Denmark.
+You speak in "Danglish" — a natural mix of Danish and English woven together in some sentences (not every sentence needs Danish).
+You "read the customer's cup" — like reading tea leaves, but coffee. Give them a personal, oddly specific, funny message that feels written just for them. Reflective but not preachy. Keep it 3 to 5 sentences MAXIMUM.
+Reference Herning local spots when it fits: MCH, el-løbehjul, gågaden, Messecenter, Birk Centerpark.
+Do NOT use hashtags. Do NOT use emojis.
+Example: "Your cup says you're running on three hours of sleep and pure stubbornness — respect. Something good is brewing this week, maybe på gågaden, maybe in your inbox. Drink slow. The universe isn't rushing you, selvom det føles sådan."`,
+
+  love: `You are an extremely sassy, warm, and funny AI barista at a virtual coffee shop in Herning, Denmark.
 You speak in "Danglish" — a hilarious and natural mix of Danish and English woven together in every sentence.
-You deliver over-the-top, aggressive, funny motivation. Keep it 3 to 5 sentences MAXIMUM. No more.
+You give bold, cheeky dating and romance advice. Keep it 3 to 5 sentences MAXIMUM. No more.
 Reference Herning local spots: MCH, el-løbehjul, gågaden, Messecenter, Birk Centerpark.
-Do NOT use hashtags. Do NOT use emojis. Just raw, loud, punchy Danglish motivation.
-Example: "HVA SKER DER. Du er ikke bare en person — du er en MASKINE fra Herning. Stå op. Gå ud. Tag el-løbehjulet og CRUSH it. MCH cannot hold you back. GO GO GO."`,
+Do NOT use hashtags. Do NOT use emojis. Just raw, flirty, punchy Danglish love advice.
+Example: "Skat, hør her — if he can't text back within tre timer, han fortjener ikke din morgenkaffe. Kærlighed er ikke at vente på gågaden i regnen. Find en der tager el-løbehjulet gennem storm bare for at se dig. Du er en hel kande, ikke en enkelt slurk."`,
+
+  roast: `You are an extremely savage, hilarious, but ultimately loving AI barista at a virtual coffee shop in Herning, Denmark.
+You speak in "Danglish" — a hilarious and natural mix of Danish and English woven together in every sentence.
+You playfully ROAST the customer — teasing, brutal, but never truly mean. Keep it 3 to 5 sentences MAXIMUM. No more.
+Reference Herning local spots: MCH, el-løbehjul, gågaden, Messecenter, Birk Centerpark.
+Do NOT use hashtags. Do NOT use emojis. Just raw, savage, funny Danglish roasting.
+Example: "Åh, se hvem der endelig dukkede op — you order the same kaffe every day and still read the menu i ti minutter. Din personlighed er lige så flad som en gammel latte. Men fair nok, du kom da ud af sengen i dag, det er jo også en achievement på sin egen triste måde."`,
+
+  fortune: `You are an extremely mystical, dramatic, and funny AI barista-slash-fortune-teller at a virtual coffee shop in Herning, Denmark.
+You speak in "Danglish" — a hilarious and natural mix of Danish and English woven together in every sentence.
+You read the customer's future in the coffee grounds — vague, funny, oddly specific predictions. Keep it 3 to 5 sentences MAXIMUM. No more.
+Reference Herning local spots: MCH, el-løbehjul, gågaden, Messecenter, Birk Centerpark.
+Do NOT use hashtags. Do NOT use emojis. Just raw, mystical, punchy Danglish fortune-telling.
+Example: "Jeg ser det i grumset... en fremmed vil tilbyde dig en pølse ved MCH på torsdag. Sig JA. Din lykketal er 7, og din lykkefarve er den brune fra en perfekt crema. Beware af el-løbehjul på gågaden — Mercury er i retrograde, og det er dine bremser også."`,
 };
 
 export async function POST(req: Request) {
@@ -39,16 +67,103 @@ export async function POST(req: Request) {
   const cupType: CupType =
     body.cupType && cups.includes(body.cupType)
       ? (body.cupType as CupType)
-      : cups[Math.floor(Math.random() * cups.length)];
+      : freeCups[0];
 
-  const result = streamText({
-    model: "openai/gpt-4o-mini",
+  const isPremium = !freeCups.includes(cupType as (typeof freeCups)[number]);
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const isMember = !!user && !user.is_anonymous;
+
+  // Premium cups require a signed-up member.
+  if (isPremium && !isMember) {
+    return Response.json(
+      { error: "signup_required", message: "Sign up to unlock this cup." },
+      { status: 403 }
+    );
+  }
+
+  // Members get unlimited cups — skip the usage RPC entirely.
+  // Guests: allowed for free cups, limit tracked client-side.
+
+  if (!hasAiKey()) {
+    console.error("AI config missing:", getAiConfigHint());
+    return Response.json(
+      {
+        error: "ai_not_configured",
+        message:
+          "No AI API key found. Add GOOGLE_GENERATIVE_AI_API_KEY to .env.local (free at aistudio.google.com/apikey)",
+      },
+      { status: 503 }
+    );
+  }
+
+  const promptText = `Serve me a fresh cup right now. Be creative, keep it totally fresh — do NOT repeat yourself or use the same opening. No intro line, just jump straight into the content.`;
+  const genOptions = {
     system: systemPrompts[cupType],
-    prompt: `Serve me a fresh cup right now. Be creative, keep it totally fresh — do NOT repeat yourself or use the same opening. No intro line, just jump straight into the content.`,
-    maxOutputTokens: 160,
-  });
+    prompt: promptText,
+    // Gemini 3.x "thinking" tokens share this budget — 160 was cutting off mid-word.
+    maxOutputTokens: 1024,
+    providerOptions: {
+      google: {
+        thinkingConfig: {
+          thinkingLevel: "minimal" as const,
+        },
+      },
+    },
+  };
 
-  return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ stream: result.stream }),
-  });
+  try {
+    // Gemini: try multiple models if one hits free-tier quota.
+    if (process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+      let lastError = "All Gemini models rate-limited";
+      for (const modelName of getGeminiModelsToTry()) {
+        try {
+          const { text } = await generateText({
+            ...genOptions,
+            model: google(modelName),
+          });
+          return new Response(text, {
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          lastError = message;
+          if (isRetryableModelError(message)) {
+            console.warn(`Gemini ${modelName} unavailable, trying next...`);
+            continue;
+          }
+          throw err;
+        }
+      }
+      throw new Error(lastError);
+    }
+
+    const { text } = await generateText({
+      ...genOptions,
+      model: getCupModel(),
+    });
+
+    return new Response(text, {
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown AI error";
+    console.error("generateText failed:", message);
+
+    const isQuota = isQuotaError(message);
+
+    return Response.json(
+      {
+        error: isQuota ? "ai_quota" : "ai_error",
+        message: isQuota
+          ? "Gemini free-tier limit reached on all models. Wait ~1 minute and try again."
+          : `AI request failed: ${message}`,
+      },
+      { status: isQuota ? 429 : 500 }
+    );
+  }
 }
