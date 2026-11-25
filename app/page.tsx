@@ -1,5 +1,5 @@
 import { ThemeToggle } from "@/components/theme-toggle";
-import { DailyCup } from "@/components/barista/daily-cup";
+import { DemoGate } from "@/components/barista/demo-gate";
 import Image from "next/image";
 import { Coffee, MapPin, Clock, Sparkles, MessageCircle, Flame } from "lucide-react";
 
@@ -71,7 +71,7 @@ export default function Home() {
 
         {/* Daily Cup interactive section */}
         <section className="px-6 pb-16 flex justify-center">
-          <DailyCup />
+          <DemoGate />
         </section>
 
         {/* Divider */}
